@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import axios from 'axios';
 import { BarChart, Bar, XAxis, YAxis, Tooltip } from 'recharts';
+import './App.css';
 
 const API_URL = "https://gaming-backlog-api.onrender.com";
 
@@ -34,6 +35,10 @@ function App() {
     return Object.entries(counts).map(([status, count]) => ({status,count}));
   };
 
+  const getStatusClass = (status) => {
+    return "status-" + status.toLowerCase().replace(/\s+/g, "-");
+  };
+
   useEffect(() => {
     fetchGames();
   }, []);
@@ -48,11 +53,11 @@ function App() {
           <XAxis dataKey="status" />
           <YAxis allowDecimals={false} />
           <Tooltip />
-          <Bar dataKey="count" fill="#8884d8" />
+          <Bar dataKey="count" fill="#5ee6a0" />
         </BarChart>
 
     {games.map((game) => (
-      <p key={game.id}>
+      <div key={game.id} className={`game-card ${getStatusClass(game.status)}`}>
         {editingId === game.id ? (
           <>
             <input
@@ -74,46 +79,53 @@ function App() {
               Save
             </button>
           </>
-
         ) : (
           <>
-            {game.title} — {game.status}
-            <button onClick={() => {
-              setEditingId(game.id);
-              setEditTitle(game.title);
-              setEditStatus(game.status);
-            }}>
-              Edit
-            </button>
-            <button onClick={() => {
-              axios.delete(`${API_URL}/games/${game.id}`).then(() => {
-                fetchGames();
-              });
-            }}>
-              Delete
-            </button>
+            <div>
+              <div className="game-title">{game.title}</div>
+              <div className="game-status">{game.status}</div>
+            </div>
+            <div className="game-actions">
+              <button onClick={() => {
+                setEditingId(game.id);
+                setEditTitle(game.title);
+                setEditStatus(game.status);
+              }}>
+                Edit
+              </button>
+              <button onClick={() => {
+                axios.delete(`${API_URL}/games/${game.id}`).then(() => {
+                  fetchGames();
+                });
+              }}>
+                Delete
+              </button>
+            </div>
           </>
         )}
-      </p>
+      </div>
     ))}
 
-    <div>
-      <button onClick={() => fetchRecommendations("resume")}>
-        What should I keep playing?
-      </button>
-      <button onClick={() => fetchRecommendations("something_new")}>
-          Something new?
-      </button>
+      <div className="rec-panel">
+        <div className="rec-buttons">
+          <button onClick={() => fetchRecommendations("resume")}>
+            What should I keep playing?
+          </button>
+          <button onClick={() => fetchRecommendations("something_new")}>
+            Something new?
+          </button>
+        </div>
 
-       {recommendations.map((rec) => (
-        <div key={rec.title}>
-          <p><strong>{rec.title}</strong> — {rec.status} (score: {rec.score})</p>
-          <p>{rec.reason}</p>
-         </div>
+        {recommendations.map((rec) => (
+          <div key={rec.title} className="rec-card">
+            <span className="rec-score">{rec.score}</span>
+            <div className="rec-title">{rec.title} — {rec.status}</div>
+            <div className="rec-reason">{rec.reason}</div>
+          </div>
         ))}
-    </div>
+      </div>
 
-      <form onSubmit={(e) => {
+      <form className="add-form" onSubmit={(e) => {
         e.preventDefault();
         axios.post(`${API_URL}/games`, null, {
           params: { title: title, status: status }
