@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import axios from 'axios';
 import { BarChart, Bar, XAxis, YAxis, Tooltip } from 'recharts';
 
+const API_URL = "https://gaming-backlog-api.onrender.com";
+
 function App() {
   const [games, setGames] = useState([]);
   const [title, setTitle] = useState('');
@@ -13,13 +15,13 @@ function App() {
   const [recommendations, setRecommendations] = useState([]);
 
   const fetchGames = () => {
-    axios.get('http://localhost:8000/games').then((response) => {
+    axios.get(`${API_URL}/games`).then((response) => {
       setGames(response.data);
     })
   }
 
   const fetchRecommendations = (mode) => {                      
-    axios.get(`http://localhost:8000/recommendations?mode=${mode}`).then((response) => {
+    axios.get(`${API_URL}/recommendations?mode=${mode}`).then((response) => {
       setRecommendations(response.data);
     });
   };
@@ -62,7 +64,7 @@ function App() {
               onChange={(e) => setEditStatus(e.target.value)}
             />
             <button onClick={() => {
-              axios.patch(`http://localhost:8000/games/${game.id}`, null, {
+              axios.patch(`${API_URL}/games/${game.id}`, null, {
                 params: { title: editTitle, status: editStatus }
               }).then(() => {
                 setEditingId(null);
@@ -84,7 +86,7 @@ function App() {
               Edit
             </button>
             <button onClick={() => {
-              axios.delete(`http://localhost:8000/games/${game.id}`).then(() => {
+              axios.delete(`${API_URL}/games/${game.id}`).then(() => {
                 fetchGames();
               });
             }}>
@@ -113,7 +115,7 @@ function App() {
 
       <form onSubmit={(e) => {
         e.preventDefault();
-        axios.post('http://localhost:8000/games', null, {
+        axios.post(`${API_URL}/games`, null, {
           params: { title: title, status: status }
         }).then(() => {
           setTitle('');
