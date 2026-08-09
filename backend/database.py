@@ -4,7 +4,11 @@ from sqlalchemy.orm import declarative_base
 
 
 # Creating the connection to backlog 
-engine = create_engine("sqlite:///backlog.db")
+import os
+
+DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///backlog.db")
+engine = create_engine(DATABASE_URL)
+
 
 # Creating a session
 SessionLocal = sessionmaker(bind=engine)
