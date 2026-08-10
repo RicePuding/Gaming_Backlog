@@ -1,3 +1,16 @@
+/* Section wrappers — keeps title/chart/list/rec/form evenly separated */
+.chart-panel {
+  margin-bottom: var(--space-lg);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-md);
+}
+
+.game-list {
+  margin-bottom: var(--space-lg);
+}
+
 .game-card {
   display: flex;
   align-items: center;
@@ -21,6 +34,20 @@
 
 .game-card.status-dropped {
   border-left-color: var(--dropped);
+}
+
+.game-info {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+}
+
+.game-cover {
+  width: 56px;
+  height: 56px;
+  object-fit: cover;
+  border-radius: 6px;
+  flex-shrink: 0;
 }
 
 .game-title {
@@ -62,7 +89,7 @@ button {
   border-radius: 6px;
   padding: 8px 16px;
   cursor: pointer;
-  transition: background 0.15s, border-color 0.15s;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
 }
 
 button:hover {
@@ -79,9 +106,18 @@ button[type="submit"]:hover {
   filter: brightness(1.1);
 }
 
-.game-actions button:last-child:hover {
+/* Delete button: red outline at rest, solid red fill on hover.
+   Using --bg for hover text color so it stays readable against the red fill —
+   if your :root doesn't define --bg, swap in whatever variable holds your
+   page background color. */
+.game-actions button:last-child {
   border-color: var(--dropped);
   color: var(--dropped);
+}
+
+.game-actions button:last-child:hover {
+  background: var(--dropped);
+  color: var(--bg);
 }
 
 /* Inputs */
@@ -102,6 +138,26 @@ input:focus {
 
 input::placeholder {
   color: var(--text-muted);
+}
+
+select {
+  font-family: var(--font-body);
+  font-size: 14px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+
+select:focus {
+  outline: none;
+  border-color: var(--playing);
+}
+
+.add-form select {
+  flex: 1;
 }
 
 /* Recommendation readout panel */
