@@ -1,4 +1,5 @@
 import os
+import time
 import requests
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi import FastAPI, HTTPException
@@ -20,25 +21,73 @@ Base.metadata.create_all(bind=engine)
 
 # starting server: uvicorn main:app --reload
 
-RAWG_API_KEY = os.environ.get("RAWG_API_KEY")
+TWITCH_CLIENT_ID = os.environ.get("TWITCH_CLIENT_ID")
+TWITCH_CLIENT_SECRET = os.environ.get("TWITCH_CLIENT_SECRET")
+
+# In-memory cache for the IGDB access token, so we don't request a new one
+# on every single game lookup. Twitch tokens last a long time (~60 days),
+# we just refresh a little before they actually expire.
+_igdb_token_cache = {"access_token": None, "expires_at": 0}
 
 
-def fetch_cover_image(title: str):
-    """Looks up a game's cover image on RAWG by title.
-    Returns None (never raises) if the key is missing, the request fails,
-    or there's no match — a failed lookup should never block adding a game."""
-    if not RAWG_API_KEY:
+def get_igdb_token():
+    """Returns a valid IGDB/Twitch access token, fetching a new one only
+    when we don't have one cached or it's about to expire."""
+    if _igdb_token_cache["access_token"] and time.time() < _igdb_token_cache["expires_at"]:
+        return _igdb_token_cache["access_token"]
+
+    if not TWITCH_CLIENT_ID or not TWITCH_CLIENT_SECRET:
         return None
+
     try:
-        response = requests.get(
-            "https://api.rawg.io/api/games",
-            params={"key": RAWG_API_KEY, "search": title, "page_size": 1},
+        response = requests.post(
+            "https://id.twitch.tv/oauth2/token",
+            params={
+                "client_id": TWITCH_CLIENT_ID,
+                "client_secret": TWITCH_CLIENT_SECRET,
+                "grant_type": "client_credentials",
+            },
             timeout=5,
         )
         response.raise_for_status()
-        results = response.json().get("results", [])
-        if results:
-            return results[0].get("background_image")
+        data = response.json()
+        _igdb_token_cache["access_token"] = data["access_token"]
+        # Refresh 60 seconds early as a safety margin
+        _igdb_token_cache["expires_at"] = time.time() + data["expires_in"] - 60
+        return _igdb_token_cache["access_token"]
+    except requests.RequestException:
+        return None
+
+
+def fetch_cover_image(title: str):
+    """Looks up a game's cover image on IGDB by title.
+    Returns None (never raises) if credentials are missing, the request
+    fails, or there's no match — a failed lookup should never block
+    adding a game."""
+    token = get_igdb_token()
+    if not TWITCH_CLIENT_ID or not token:
+        return None
+
+    safe_title = title.replace('"', "")
+
+    try:
+        response = requests.post(
+            "https://api.igdb.com/v4/games",
+            headers={
+                "Client-ID": TWITCH_CLIENT_ID,
+                "Authorization": f"Bearer {token}",
+            },
+            data=f'search "{safe_title}"; fields cover.url; limit 1;',
+            timeout=5,
+        )
+        response.raise_for_status()
+        results = response.json()
+        if results and results[0].get("cover"):
+            cover_url = results[0]["cover"]["url"]
+            # IGDB returns protocol-relative thumbnail URLs like
+            # "//images.igdb.com/igdb/image/upload/t_thumb/xyz.jpg" —
+            # add https: and swap to a bigger image size than the default.
+            return "https:" + cover_url.replace("t_thumb", "t_cover_big")
     except requests.RequestException:
         pass
     return None
@@ -102,7 +151,6 @@ def patch_game(game_id: int, title: str = None, status: str = None, priority: in
         game.title = title
         # title changed -> re-look-up the cover so it doesn't go stale
         game.cover_url = fetch_cover_image(title)
-        
     if status is not None:
         game.status = status
     if priority is not None:
