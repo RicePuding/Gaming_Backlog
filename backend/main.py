@@ -37,6 +37,7 @@ def get_igdb_token():
         return _igdb_token_cache["access_token"]
 
     if not TWITCH_CLIENT_ID or not TWITCH_CLIENT_SECRET:
+        print("[cover] Missing TWITCH_CLIENT_ID or TWITCH_CLIENT_SECRET env var")
         return None
 
     try:
@@ -49,13 +50,17 @@ def get_igdb_token():
             },
             timeout=5,
         )
+        print(f"[cover] Twitch token request status: {response.status_code}")
+        if response.status_code != 200:
+            print(f"[cover] Twitch token response body: {response.text}")
         response.raise_for_status()
         data = response.json()
         _igdb_token_cache["access_token"] = data["access_token"]
         # Refresh 60 seconds early as a safety margin
         _igdb_token_cache["expires_at"] = time.time() + data["expires_in"] - 60
         return _igdb_token_cache["access_token"]
-    except requests.RequestException:
+    except requests.RequestException as e:
+        print(f"[cover] Twitch token request failed: {e}")
         return None
 
 
@@ -66,6 +71,7 @@ def fetch_cover_image(title: str):
     adding a game."""
     token = get_igdb_token()
     if not TWITCH_CLIENT_ID or not token:
+        print("[cover] No token available, skipping IGDB lookup")
         return None
 
     safe_title = title.replace('"', "")
@@ -76,10 +82,13 @@ def fetch_cover_image(title: str):
             headers={
                 "Client-ID": TWITCH_CLIENT_ID,
                 "Authorization": f"Bearer {token}",
+                "Content-Type": "text/plain",
             },
-            data=f'search "{safe_title}"; fields cover.url; limit 1;',
+            data=f'search "{safe_title}"; fields name,cover.url; limit 1;',
             timeout=5,
         )
+        print(f"[cover] IGDB request status for '{title}': {response.status_code}")
+        print(f"[cover] IGDB response body: {response.text}")
         response.raise_for_status()
         results = response.json()
         if results and results[0].get("cover"):
@@ -88,8 +97,9 @@ def fetch_cover_image(title: str):
             # "//images.igdb.com/igdb/image/upload/t_thumb/xyz.jpg" —
             # add https: and swap to a bigger image size than the default.
             return "https:" + cover_url.replace("t_thumb", "t_cover_big")
-    except requests.RequestException:
-        pass
+        print(f"[cover] No cover found in IGDB results for '{title}'")
+    except requests.RequestException as e:
+        print(f"[cover] IGDB request failed: {e}")
     return None
 
 
