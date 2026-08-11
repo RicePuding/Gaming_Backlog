@@ -14,3 +14,4 @@ class Game(Base):
     priority = Column(Integer)
     estimated_hours = Column(Integer)
     cover_url = Column(String, nullable=True)
+    genre = Column(String, nullable=True)

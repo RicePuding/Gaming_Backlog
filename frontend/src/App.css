@@ -11,6 +11,68 @@
   margin-bottom: var(--space-lg);
 }
 
+/* Title autocomplete (Add Game form) */
+.autocomplete-wrapper {
+  position: relative;
+  flex: 1;
+}
+
+.autocomplete-wrapper input {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.autocomplete-list {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  max-height: 260px;
+  overflow-y: auto;
+  list-style: none;
+  margin: 0;
+  padding: 4px;
+  z-index: 10;
+}
+
+.autocomplete-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: 8px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.autocomplete-item:hover {
+  background: var(--border);
+}
+
+.autocomplete-cover {
+  width: 32px;
+  height: 32px;
+  object-fit: cover;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.autocomplete-name {
+  font-family: var(--font-body);
+  font-size: 14px;
+  color: var(--text);
+}
+
+.autocomplete-genre {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
 .game-card {
   display: flex;
   align-items: center;

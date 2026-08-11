@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { BarChart, Bar, XAxis, YAxis, Tooltip } from 'recharts';
 import './App.css';
@@ -16,6 +16,13 @@ function App() {
   const [editTitle, setEditTitle] = useState('');
   const [editStatus, setEditStatus] = useState('');
   const [recommendations, setRecommendations] = useState([]);
+
+  // Autocomplete state for the "Game title" field in the Add Game form
+  const [suggestions, setSuggestions] = useState([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  // Prevents the search effect from firing again right after the user
+  // clicks a suggestion (which also changes `title`)
+  const skipNextSearch = useRef(false);
 
   const fetchGames = () => {
     axios.get(`${API_URL}/games`).then((response) => {
@@ -44,6 +51,36 @@ function App() {
   useEffect(() => {
     fetchGames();
   }, []);
+
+  // Debounced search-as-you-type: waits 300ms after the user stops typing
+  // before hitting the backend, so we're not firing a request per keystroke.
+  useEffect(() => {
+    if (skipNextSearch.current) {
+      skipNextSearch.current = false;
+      return;
+    }
+    const timeoutId = setTimeout(() => {
+      if (title.trim().length < 2) {
+        setSuggestions([]);
+        return;
+      }
+      axios.get(`${API_URL}/games/search`, { params: { q: title } })
+        .then((response) => {
+          setSuggestions(response.data);
+          setShowSuggestions(true);
+        })
+        .catch(() => setSuggestions([]));
+    }, 300);
+
+    return () => clearTimeout(timeoutId);
+  }, [title]);
+
+  const selectSuggestion = (name) => {
+    skipNextSearch.current = true;
+    setTitle(name);
+    setSuggestions([]);
+    setShowSuggestions(false);
+  };
 
   console.log(getStatusCounts());
 
@@ -151,14 +188,41 @@ function App() {
         }).then(() => {
           setTitle('');
           setStatus('');
+          setSuggestions([]);
           fetchGames();
         });
       }}>
-        <input
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          placeholder="Game title"
-        />
+        <div className="autocomplete-wrapper">
+          <input
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            onFocus={() => { if (suggestions.length > 0) setShowSuggestions(true); }}
+            onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
+            placeholder="Game title"
+            autoComplete="off"
+          />
+          {showSuggestions && suggestions.length > 0 && (
+            <ul className="autocomplete-list">
+              {suggestions.map((s) => (
+                <li
+                  key={s.name}
+                  className="autocomplete-item"
+                  onMouseDown={() => selectSuggestion(s.name)}
+                >
+                  {s.cover_url && (
+                    <img src={s.cover_url} alt="" className="autocomplete-cover" />
+                  )}
+                  <div>
+                    <div className="autocomplete-name">{s.name}</div>
+                    {s.genres.length > 0 && (
+                      <div className="autocomplete-genre">{s.genres.join(', ')}</div>
+                    )}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
         <select
           value={status}
           onChange={(e) => setStatus(e.target.value)}
