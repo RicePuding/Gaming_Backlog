@@ -5,7 +5,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi import FastAPI, HTTPException
 from database import engine, Base, SessionLocal
 from models import Game
-from recommendation import score_resume, score_something_new, get_reason
+from recommendation import (
+    score_resume,
+    score_something_new,
+    get_reason,
+    score_quiz,
+    get_quiz_reason,
+)
 
 app = FastAPI()
 
@@ -174,8 +180,29 @@ def search_games(q: str):
         return []
 
 
+@app.get("/genres")
+def get_genres():
+    """Returns the distinct list of genres actually present in the user's
+    backlog. The quiz uses this to offer genre buttons — this way it never
+    asks about a genre the user has zero games in."""
+    db = SessionLocal()
+    # .distinct() on the genre column, ignoring games that don't have one yet
+    rows = db.query(Game.genre).filter(Game.genre.isnot(None)).distinct().all()
+    db.close()
+    # `rows` comes back as a list of one-item tuples like [("Shooter",), ...],
+    # so we pull the first element out of each one.
+    genres = sorted({row[0] for row in rows if row[0]})
+    return genres
+
+
 @app.post("/games")
-def create_game(title: str, status: str, priority: int = 3, estimated_hours: int = None):
+def create_game(
+    title: str,
+    status: str,
+    priority: int = 3,
+    estimated_hours: int = None,
+    session_length: str = None,
+):
     db = SessionLocal()
     metadata = fetch_game_metadata(title)
     new_game = Game(
@@ -185,6 +212,7 @@ def create_game(title: str, status: str, priority: int = 3, estimated_hours: int
         estimated_hours=estimated_hours,
         cover_url=metadata["cover_url"],
         genre=metadata["genre"],
+        session_length=session_length,
     )
     db.add(new_game)
     db.commit()
@@ -204,7 +232,14 @@ def delete_game(game_id: int):
 
 
 @app.patch("/games/{game_id}")
-def patch_game(game_id: int, title: str = None, status: str = None, priority: int = None, estimated_hours: int = None):
+def patch_game(
+    game_id: int,
+    title: str = None,
+    status: str = None,
+    priority: int = None,
+    estimated_hours: int = None,
+    session_length: str = None,
+):
     db = SessionLocal()
     game = get_game_or_404(db, game_id)
     if title is not None:
@@ -219,6 +254,8 @@ def patch_game(game_id: int, title: str = None, status: str = None, priority: in
         game.priority = priority
     if estimated_hours is not None:
         game.estimated_hours = estimated_hours
+    if session_length is not None:
+        game.session_length = session_length
 
     db.commit()
     db.refresh(game)
@@ -251,3 +288,58 @@ def get_recommendations(mode: str = "resume"):
         }
         for game, score in top_three
     ]
+
+
+@app.get("/quiz-recommendation")
+def quiz_recommendation(session_length: str = "any", genre: str = "any"):
+    """The core of the 'what should I play?' chat flow. Filters the backlog
+    by session length and genre, scores what's left, and returns the single
+    best pick with a natural-language explanation.
+
+    If nothing matches BOTH filters, we relax them one at a time (genre
+    first, then session length) rather than returning nothing — an
+    imperfect suggestion beats a dead end.
+    """
+    db = SessionLocal()
+    games = db.query(Game).all()
+    db.close()
+
+    # Dropped games are never worth suggesting, regardless of filters
+    candidates = [g for g in games if g.status != "Dropped"]
+
+    def matches_session(g):
+        return session_length == "any" or g.session_length == session_length
+
+    def matches_genre(g):
+        return genre == "any" or g.genre == genre
+
+    relaxed_filters = []
+
+    # Try: both filters applied
+    filtered = [g for g in candidates if matches_session(g) and matches_genre(g)]
+
+    # Fallback 1: drop the genre filter, keep session length
+    if not filtered and genre != "any":
+        relaxed_filters = ["genre"]
+        filtered = [g for g in candidates if matches_session(g)]
+
+    # Fallback 2: drop session length too, just use whatever's left
+    if not filtered and session_length != "any":
+        relaxed_filters = ["session_length"]
+        filtered = candidates
+
+    if not filtered:
+        return {"found": False, "message": "Your backlog is empty — add some games first!"}
+
+    scored = [(g, score_quiz(g)) for g in filtered]
+    scored.sort(key=lambda pair: pair[1], reverse=True)
+    best_game, _ = scored[0]
+
+    return {
+        "found": True,
+        "title": best_game.title,
+        "status": best_game.status,
+        "genre": best_game.genre,
+        "cover_url": best_game.cover_url,
+        "reason": get_quiz_reason(best_game, session_length, genre, relaxed_filters),
+    }

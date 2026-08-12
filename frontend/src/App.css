@@ -222,6 +222,97 @@ select:focus {
   flex: 1;
 }
 
+/* "What should I play?" quiz */
+.quiz-panel {
+  margin-bottom: var(--space-lg);
+}
+
+.quiz-start-button {
+  width: 100%;
+  background: var(--panel);
+  border: 1px solid var(--playing);
+  color: var(--playing);
+  font-size: 16px;
+  padding: var(--space-md);
+}
+
+.quiz-start-button:hover {
+  background: var(--playing);
+  color: var(--bg);
+}
+
+.quiz-chat {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+/* Chat bubbles: assistant messages align left with a subtle background,
+   user's own "answers" align right with the accent color so the flow
+   reads like a real conversation. */
+.quiz-bubble {
+  max-width: 80%;
+  padding: 10px 14px;
+  border-radius: 14px;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.quiz-bubble-assistant {
+  align-self: flex-start;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+
+.quiz-bubble-user {
+  align-self: flex-end;
+  background: var(--playing);
+  color: var(--bg);
+  font-weight: 600;
+}
+
+.quiz-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+}
+
+.quiz-result {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.quiz-result-cover {
+  width: 48px;
+  height: 48px;
+  object-fit: cover;
+  border-radius: 6px;
+  flex-shrink: 0;
+}
+
+.quiz-result-title {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 16px;
+}
+
+.quiz-result-reason {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.quiz-restart-button,
+.quiz-close-button {
+  align-self: flex-start;
+}
+
 /* Recommendation readout panel */
 .rec-panel {
   margin: var(--space-lg) 0;

@@ -7,10 +7,20 @@ const API_URL = "https://gaming-backlog-api.onrender.com";
 
 const STATUS_OPTIONS = ["Not Started", "Playing", "Paused", "Finished", "Dropped"];
 
+// Session length options for both the Add Game form and the quiz.
+// `value` is what gets sent to the backend/stored in the DB, `label` is
+// what the user actually sees.
+const SESSION_OPTIONS = [
+  { value: "quick", label: "Quick (under 30 min)" },
+  { value: "medium", label: "Medium (30–90 min)" },
+  { value: "long", label: "Long (90+ min)" },
+];
+
 function App() {
   const [games, setGames] = useState([]);
   const [title, setTitle] = useState('');
   const [status, setStatus] = useState('');
+  const [sessionLength, setSessionLength] = useState('');
 
   const [editingId, setEditingId] = useState(null);
   const [editTitle, setEditTitle] = useState('');
@@ -23,6 +33,18 @@ function App() {
   // Prevents the search effect from firing again right after the user
   // clicks a suggestion (which also changes `title`)
   const skipNextSearch = useRef(false);
+
+  // --- Quiz state ---
+  // quizStep tracks where we are in the conversation:
+  // 'closed' -> not open at all
+  // 'time'   -> asking "how much time do you have?"
+  // 'genre'  -> asking "what are you in the mood for?"
+  // 'result' -> showing the recommendation
+  const [quizStep, setQuizStep] = useState('closed');
+  const [quizTime, setQuizTime] = useState(null);
+  const [availableGenres, setAvailableGenres] = useState([]);
+  const [quizResult, setQuizResult] = useState(null);
+  const [quizLoading, setQuizLoading] = useState(false);
 
   const fetchGames = () => {
     axios.get(`${API_URL}/games`).then((response) => {
@@ -80,6 +102,44 @@ function App() {
     setTitle(name);
     setSuggestions([]);
     setShowSuggestions(false);
+  };
+
+  // --- Quiz functions ---
+
+  // Starts the quiz: reset any previous answer, fetch which genres actually
+  // exist in the backlog (so we never offer a genre with zero games), then
+  // move to the first question.
+  const startQuiz = () => {
+    setQuizResult(null);
+    setQuizTime(null);
+    axios.get(`${API_URL}/genres`).then((response) => {
+      setAvailableGenres(response.data);
+      setQuizStep('time');
+    });
+  };
+
+  // User tapped a time option -> remember it, move to the genre question.
+  const answerTime = (value) => {
+    setQuizTime(value);
+    setQuizStep('genre');
+  };
+
+  // User tapped a genre (or "Anything") -> call the backend, show the result.
+  const answerGenre = (genreValue) => {
+    setQuizLoading(true);
+    axios.get(`${API_URL}/quiz-recommendation`, {
+      params: { session_length: quizTime, genre: genreValue },
+    }).then((response) => {
+      setQuizResult(response.data);
+      setQuizStep('result');
+      setQuizLoading(false);
+    }).catch(() => {
+      setQuizLoading(false);
+    });
+  };
+
+  const closeQuiz = () => {
+    setQuizStep('closed');
   };
 
   console.log(getStatusCounts());
@@ -162,6 +222,99 @@ function App() {
         ))}
       </div>
 
+      {/* --- "What should I play?" quiz --- */}
+      <div className="quiz-panel">
+        {quizStep === 'closed' && (
+          <button className="quiz-start-button" onClick={startQuiz}>
+            🎮 Help me pick something to play
+          </button>
+        )}
+
+        {quizStep !== 'closed' && (
+          <div className="quiz-chat">
+            {/* Assistant's first question is always shown once we're past 'closed' */}
+            <div className="quiz-bubble quiz-bubble-assistant">
+              How much time do you have?
+            </div>
+
+            {/* Once the user has answered the time question, show it as
+                their own chat bubble, then move on to whichever comes next */}
+            {quizTime && (
+              <div className="quiz-bubble quiz-bubble-user">
+                {SESSION_OPTIONS.find((o) => o.value === quizTime)?.label}
+              </div>
+            )}
+
+            {quizStep === 'time' && (
+              <div className="quiz-options">
+                {SESSION_OPTIONS.map((option) => (
+                  <button key={option.value} onClick={() => answerTime(option.value)}>
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {(quizStep === 'genre' || quizStep === 'result') && (
+              <div className="quiz-bubble quiz-bubble-assistant">
+                What are you in the mood for?
+              </div>
+            )}
+
+            {quizResult && (
+              <div className="quiz-bubble quiz-bubble-user">
+                {quizResult.genre_choice || 'Anything'}
+              </div>
+            )}
+
+            {quizStep === 'genre' && (
+              <div className="quiz-options">
+                {availableGenres.map((g) => (
+                  <button key={g} onClick={() => answerGenre(g)}>{g}</button>
+                ))}
+                <button onClick={() => answerGenre('any')}>Anything</button>
+              </div>
+            )}
+
+            {quizLoading && (
+              <div className="quiz-bubble quiz-bubble-assistant">Thinking…</div>
+            )}
+
+            {quizStep === 'result' && quizResult && (
+              <div className="quiz-bubble quiz-bubble-assistant quiz-result">
+                {quizResult.found ? (
+                  <>
+                    {quizResult.cover_url && (
+                      <img
+                        src={quizResult.cover_url}
+                        alt={`${quizResult.title} cover`}
+                        className="quiz-result-cover"
+                      />
+                    )}
+                    <div>
+                      <div className="quiz-result-title">{quizResult.title}</div>
+                      <div className="quiz-result-reason">{quizResult.reason}</div>
+                    </div>
+                  </>
+                ) : (
+                  <div>{quizResult.message}</div>
+                )}
+              </div>
+            )}
+
+            {quizStep === 'result' && (
+              <button className="quiz-restart-button" onClick={startQuiz}>
+                Ask again
+              </button>
+            )}
+
+            <button className="quiz-close-button" onClick={closeQuiz}>
+              Close
+            </button>
+          </div>
+        )}
+      </div>
+
       <div className="rec-panel">
         <div className="rec-buttons">
           <button onClick={() => fetchRecommendations("resume")}>
@@ -184,10 +337,11 @@ function App() {
       <form className="add-form" onSubmit={(e) => {
         e.preventDefault();
         axios.post(`${API_URL}/games`, null, {
-          params: { title: title, status: status }
+          params: { title: title, status: status, session_length: sessionLength || null }
         }).then(() => {
           setTitle('');
           setStatus('');
+          setSessionLength('');
           setSuggestions([]);
           fetchGames();
         });
@@ -230,6 +384,15 @@ function App() {
           <option value="" disabled>Status</option>
           {STATUS_OPTIONS.map((option) => (
             <option key={option} value={option}>{option}</option>
+          ))}
+        </select>
+        <select
+          value={sessionLength}
+          onChange={(e) => setSessionLength(e.target.value)}
+        >
+          <option value="">Session length (optional)</option>
+          {SESSION_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>{option.label}</option>
           ))}
         </select>
         <button type="submit">Add Game</button>

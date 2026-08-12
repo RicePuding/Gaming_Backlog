@@ -15,3 +15,4 @@ class Game(Base):
     estimated_hours = Column(Integer)
     cover_url = Column(String, nullable=True)
     genre = Column(String, nullable=True)
+    session_length = Column(String, nullable=True)
