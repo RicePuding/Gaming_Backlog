@@ -58,30 +58,32 @@ def get_quiz_reason(game, session_length, genre, relaxed_filters):
     """Builds a natural-sounding sentence explaining the pick. `relaxed_filters`
     is a list of which filters we had to drop (e.g. ["genre"]) because
     nothing matched all of them — this keeps the response honest instead of
-    pretending it was a perfect match."""
+    pretending it was a perfect match. `game.genre` may hold several
+    comma-separated tags (genres + themes combined), which reads fine
+    dropped straight into a sentence."""
     session_labels = {
-        "quick": "a quick session",
-        "medium": "a medium-length session",
-        "long": "a longer session",
+        "quick": "something light to jump into",
+        "medium": "a medium-length game",
+        "long": "a longer, bigger commitment",
     }
     session_phrase = session_labels.get(session_length, "your session")
 
     if not relaxed_filters:
         return (
-            f"{game.title} is a good fit for {session_phrase} — "
+            f"{game.title} fits {session_phrase} — "
             f"it's tagged {game.genre} and you're currently {game.status.lower()}."
         )
 
     if "genre" in relaxed_filters:
         return (
-            f"Nothing in your backlog matched {genre} exactly for {session_phrase}, "
-            f"so here's the next best fit: {game.title} ({game.genre}), currently {game.status.lower()}."
+            f"Nothing in your backlog matched {genre} exactly, "
+            f"so here's a close fit: {game.title} ({game.genre}), currently {game.status.lower()}."
         )
 
     if "session_length" in relaxed_filters:
         return (
-            f"Nothing was tagged for {session_phrase} specifically, "
-            f"but {game.title} ({game.genre}) matches your mood and you're currently {game.status.lower()}."
+            f"Nothing matched that commitment level exactly, "
+            f"but {game.title} ({game.genre}) fits your mood and you're currently {game.status.lower()}."
         )
 
     return f"{game.title} seemed like the best overall fit from your backlog."

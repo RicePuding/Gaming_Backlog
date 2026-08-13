@@ -288,6 +288,10 @@ select:focus {
   gap: var(--space-sm);
 }
 
+.quiz-result+.quiz-result {
+  margin-top: -2px;
+}
+
 .quiz-result-cover {
   width: 48px;
   height: 48px;

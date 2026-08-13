@@ -7,20 +7,20 @@ const API_URL = "https://gaming-backlog-api.onrender.com";
 
 const STATUS_OPTIONS = ["Not Started", "Playing", "Paused", "Finished", "Dropped"];
 
-// Session length options for both the Add Game form and the quiz.
-// `value` is what gets sent to the backend/stored in the DB, `label` is
-// what the user actually sees.
+// These power the quiz's first question only now — session length is no
+// longer something you enter manually when adding a game, it's derived
+// automatically from IGDB's time-to-beat data. The label wording reflects
+// that it's really about "how big a commitment", not an exact clock time.
 const SESSION_OPTIONS = [
-  { value: "quick", label: "Quick (under 30 min)" },
-  { value: "medium", label: "Medium (30–90 min)" },
-  { value: "long", label: "Long (90+ min)" },
+  { value: "quick", label: "Something light" },
+  { value: "medium", label: "Medium-length game" },
+  { value: "long", label: "I'm ready to commit hours" },
 ];
 
 function App() {
   const [games, setGames] = useState([]);
   const [title, setTitle] = useState('');
   const [status, setStatus] = useState('');
-  const [sessionLength, setSessionLength] = useState('');
 
   const [editingId, setEditingId] = useState(null);
   const [editTitle, setEditTitle] = useState('');
@@ -37,13 +37,15 @@ function App() {
   // --- Quiz state ---
   // quizStep tracks where we are in the conversation:
   // 'closed' -> not open at all
-  // 'time'   -> asking "how much time do you have?"
+  // 'time'   -> asking "how big a commitment?"
   // 'genre'  -> asking "what are you in the mood for?"
-  // 'result' -> showing the recommendation
+  // 'result' -> showing the recommendation(s)
   const [quizStep, setQuizStep] = useState('closed');
   const [quizTime, setQuizTime] = useState(null);
+  const [quizGenre, setQuizGenre] = useState(null);
   const [availableGenres, setAvailableGenres] = useState([]);
-  const [quizResult, setQuizResult] = useState(null);
+  const [quizResults, setQuizResults] = useState(null);
+  const [quizFoundMessage, setQuizFoundMessage] = useState(null);
   const [quizLoading, setQuizLoading] = useState(false);
 
   const fetchGames = () => {
@@ -106,31 +108,41 @@ function App() {
 
   // --- Quiz functions ---
 
-  // Starts the quiz: reset any previous answer, fetch which genres actually
-  // exist in the backlog (so we never offer a genre with zero games), then
-  // move to the first question.
+  // Starts the quiz: reset any previous answer, fetch which genre/theme
+  // tags actually exist in the backlog (so we never offer an option with
+  // zero matching games), then move to the first question.
   const startQuiz = () => {
-    setQuizResult(null);
+    setQuizResults(null);
+    setQuizFoundMessage(null);
     setQuizTime(null);
+    setQuizGenre(null);
     axios.get(`${API_URL}/genres`).then((response) => {
       setAvailableGenres(response.data);
       setQuizStep('time');
     });
   };
 
-  // User tapped a time option -> remember it, move to the genre question.
+  // User tapped a time/commitment option -> remember it, ask the next question.
   const answerTime = (value) => {
     setQuizTime(value);
     setQuizStep('genre');
   };
 
-  // User tapped a genre (or "Anything") -> call the backend, show the result.
+  // User tapped a genre (or "Anything") -> remember what they actually
+  // picked (this is what fixes the old "always shows Anything" bug — we
+  // now store their real answer locally instead of trying to read it back
+  // from a field the backend never sent), then call the backend.
   const answerGenre = (genreValue) => {
+    setQuizGenre(genreValue);
     setQuizLoading(true);
     axios.get(`${API_URL}/quiz-recommendation`, {
       params: { session_length: quizTime, genre: genreValue },
     }).then((response) => {
-      setQuizResult(response.data);
+      if (response.data.found) {
+        setQuizResults(response.data.results);
+      } else {
+        setQuizFoundMessage(response.data.message);
+      }
       setQuizStep('result');
       setQuizLoading(false);
     }).catch(() => {
@@ -232,13 +244,10 @@ function App() {
 
         {quizStep !== 'closed' && (
           <div className="quiz-chat">
-            {/* Assistant's first question is always shown once we're past 'closed' */}
             <div className="quiz-bubble quiz-bubble-assistant">
-              How much time do you have?
+              What kind of commitment are you in the mood for?
             </div>
 
-            {/* Once the user has answered the time question, show it as
-                their own chat bubble, then move on to whichever comes next */}
             {quizTime && (
               <div className="quiz-bubble quiz-bubble-user">
                 {SESSION_OPTIONS.find((o) => o.value === quizTime)?.label}
@@ -261,9 +270,9 @@ function App() {
               </div>
             )}
 
-            {quizResult && (
+            {quizGenre && (
               <div className="quiz-bubble quiz-bubble-user">
-                {quizResult.genre_choice || 'Anything'}
+                {quizGenre === 'any' ? 'Anything' : quizGenre}
               </div>
             )}
 
@@ -280,25 +289,32 @@ function App() {
               <div className="quiz-bubble quiz-bubble-assistant">Thinking…</div>
             )}
 
-            {quizStep === 'result' && quizResult && (
-              <div className="quiz-bubble quiz-bubble-assistant quiz-result">
-                {quizResult.found ? (
-                  <>
-                    {quizResult.cover_url && (
+            {quizStep === 'result' && quizResults && (
+              <>
+                <div className="quiz-bubble quiz-bubble-assistant">
+                  Here's what I'd pick from your backlog:
+                </div>
+                {quizResults.map((result) => (
+                  <div key={result.title} className="quiz-bubble quiz-bubble-assistant quiz-result">
+                    {result.cover_url && (
                       <img
-                        src={quizResult.cover_url}
-                        alt={`${quizResult.title} cover`}
+                        src={result.cover_url}
+                        alt={`${result.title} cover`}
                         className="quiz-result-cover"
                       />
                     )}
                     <div>
-                      <div className="quiz-result-title">{quizResult.title}</div>
-                      <div className="quiz-result-reason">{quizResult.reason}</div>
+                      <div className="quiz-result-title">{result.title}</div>
+                      <div className="quiz-result-reason">{result.reason}</div>
                     </div>
-                  </>
-                ) : (
-                  <div>{quizResult.message}</div>
-                )}
+                  </div>
+                ))}
+              </>
+            )}
+
+            {quizStep === 'result' && quizFoundMessage && (
+              <div className="quiz-bubble quiz-bubble-assistant">
+                {quizFoundMessage}
               </div>
             )}
 
@@ -337,11 +353,10 @@ function App() {
       <form className="add-form" onSubmit={(e) => {
         e.preventDefault();
         axios.post(`${API_URL}/games`, null, {
-          params: { title: title, status: status, session_length: sessionLength || null }
+          params: { title: title, status: status }
         }).then(() => {
           setTitle('');
           setStatus('');
-          setSessionLength('');
           setSuggestions([]);
           fetchGames();
         });
@@ -384,15 +399,6 @@ function App() {
           <option value="" disabled>Status</option>
           {STATUS_OPTIONS.map((option) => (
             <option key={option} value={option}>{option}</option>
-          ))}
-        </select>
-        <select
-          value={sessionLength}
-          onChange={(e) => setSessionLength(e.target.value)}
-        >
-          <option value="">Session length (optional)</option>
-          {SESSION_OPTIONS.map((option) => (
-            <option key={option.value} value={option.value}>{option.label}</option>
           ))}
         </select>
         <button type="submit">Add Game</button>

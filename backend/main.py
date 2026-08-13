@@ -70,12 +70,22 @@ def get_igdb_token():
         return None
 
 
+def _igdb_headers(token):
+    return {
+        "Client-ID": TWITCH_CLIENT_ID,
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "text/plain",
+    }
+
+
 def fetch_game_metadata(title: str):
-    """Looks up a game on IGDB by title and returns its cover image URL and
-    primary genre in one request. Returns {"cover_url": None, "genre": None}
-    (never raises) if credentials are missing, the request fails, or
-    there's no match — a failed lookup should never block adding a game."""
-    empty = {"cover_url": None, "genre": None}
+    """Looks up a game on IGDB by title and returns everything we want to
+    auto-fill: cover image, a combined genre+theme tag list, and a
+    quick/medium/long "commitment size" derived from how long the game
+    typically takes to beat. Never raises — a failed lookup just means
+    empty metadata, it should never block adding a game."""
+    empty = {"cover_url": None, "tags": None, "session_length": None, "estimated_hours": None}
+
     token = get_igdb_token()
     if not TWITCH_CLIENT_ID or not token:
         print("[metadata] No token available, skipping IGDB lookup")
@@ -84,17 +94,15 @@ def fetch_game_metadata(title: str):
     safe_title = title.replace('"', "")
 
     try:
+        # Step 1: find the game itself, its cover, genres, themes, and its
+        # internal IGDB id (we need the id for the time-to-beat lookup below)
         response = requests.post(
             "https://api.igdb.com/v4/games",
-            headers={
-                "Client-ID": TWITCH_CLIENT_ID,
-                "Authorization": f"Bearer {token}",
-                "Content-Type": "text/plain",
-            },
-            data=f'search "{safe_title}"; fields cover.url,genres.name; limit 1;',
+            headers=_igdb_headers(token),
+            data=f'search "{safe_title}"; fields id,cover.url,genres.name,themes.name; limit 1;',
             timeout=5,
         )
-        print(f"[metadata] IGDB request status for '{title}': {response.status_code}")
+        print(f"[metadata] IGDB game search status for '{title}': {response.status_code}")
         response.raise_for_status()
         results = response.json()
         if not results:
@@ -102,15 +110,63 @@ def fetch_game_metadata(title: str):
             return empty
 
         game = results[0]
+
         cover_url = None
         if game.get("cover"):
             cover_url = "https:" + game["cover"]["url"].replace("t_thumb", "t_cover_big")
 
-        genre = None
-        if game.get("genres"):
-            genre = game["genres"][0]["name"]
+        # Combine genres + themes into one deduplicated tag list, e.g.
+        # "Role-playing (RPG), Adventure, Fantasy, Open world" — this is
+        # what lets the quiz offer things like "Horror" (a theme) alongside
+        # "Shooter" (a genre) as one unified set of options.
+        tag_names = []
+        for g in game.get("genres", []):
+            if g["name"] not in tag_names:
+                tag_names.append(g["name"])
+        for t in game.get("themes", []):
+            if t["name"] not in tag_names:
+                tag_names.append(t["name"])
+        tags = ", ".join(tag_names) if tag_names else None
 
-        return {"cover_url": cover_url, "genre": genre}
+        # Step 2: look up how long this game takes to beat, so we can
+        # auto-categorize it instead of asking the user to guess a number.
+        session_length = None
+        estimated_hours = None
+        game_id = game.get("id")
+        if game_id:
+            try:
+                tt_response = requests.post(
+                    "https://api.igdb.com/v4/game_time_to_beats",
+                    headers=_igdb_headers(token),
+                    data=f'where game_id = {game_id}; fields normally;',
+                    timeout=5,
+                )
+                print(f"[metadata] Time-to-beat status for '{title}': {tt_response.status_code}")
+                tt_response.raise_for_status()
+                tt_results = tt_response.json()
+                if tt_results and tt_results[0].get("normally"):
+                    # IGDB gives this in seconds; convert to a rough hour count
+                    seconds = tt_results[0]["normally"]
+                    hours = round(seconds / 3600)
+                    estimated_hours = hours
+                    if hours < 10:
+                        session_length = "quick"
+                    elif hours < 30:
+                        session_length = "medium"
+                    else:
+                        session_length = "long"
+            except requests.RequestException as e:
+                print(f"[metadata] Time-to-beat lookup failed: {e}")
+                # Not finding a time-to-beat entry is common (lots of games
+                # don't have community data yet) — that's fine, we just
+                # leave session_length/estimated_hours as None.
+
+        return {
+            "cover_url": cover_url,
+            "tags": tags,
+            "session_length": session_length,
+            "estimated_hours": estimated_hours,
+        }
     except requests.RequestException as e:
         print(f"[metadata] IGDB request failed: {e}")
         return empty
@@ -152,11 +208,7 @@ def search_games(q: str):
     try:
         response = requests.post(
             "https://api.igdb.com/v4/games",
-            headers={
-                "Client-ID": TWITCH_CLIENT_ID,
-                "Authorization": f"Bearer {token}",
-                "Content-Type": "text/plain",
-            },
+            headers=_igdb_headers(token),
             data=f'search "{safe_q}"; fields name,cover.url,genres.name; limit 5;',
             timeout=5,
         )
@@ -182,37 +234,42 @@ def search_games(q: str):
 
 @app.get("/genres")
 def get_genres():
-    """Returns the distinct list of genres actually present in the user's
-    backlog. The quiz uses this to offer genre buttons — this way it never
-    asks about a genre the user has zero games in."""
+    """Returns the distinct list of genre/theme tags actually present in the
+    user's backlog. Since each game's `genre` column can now hold several
+    comma-separated tags, we split every game's tag string and flatten them
+    into one deduplicated, sorted list. This is what powers the quiz's mood
+    buttons — it never offers a tag with zero matching games."""
     db = SessionLocal()
-    # .distinct() on the genre column, ignoring games that don't have one yet
-    rows = db.query(Game.genre).filter(Game.genre.isnot(None)).distinct().all()
+    rows = db.query(Game.genre).filter(Game.genre.isnot(None)).all()
     db.close()
-    # `rows` comes back as a list of one-item tuples like [("Shooter",), ...],
-    # so we pull the first element out of each one.
-    genres = sorted({row[0] for row in rows if row[0]})
-    return genres
+
+    all_tags = set()
+    for (genre_string,) in rows:
+        if not genre_string:
+            continue
+        for tag in genre_string.split(","):
+            tag = tag.strip()
+            if tag:
+                all_tags.add(tag)
+
+    return sorted(all_tags)
 
 
 @app.post("/games")
-def create_game(
-    title: str,
-    status: str,
-    priority: int = 3,
-    estimated_hours: int = None,
-    session_length: str = None,
-):
+def create_game(title: str, status: str, priority: int = 3):
+    """Note: cover, genre/theme tags, and session-length category are no
+    longer accepted as manual input — they're always auto-derived from
+    IGDB, same as the cover image already was."""
     db = SessionLocal()
     metadata = fetch_game_metadata(title)
     new_game = Game(
         title=title,
         status=status,
         priority=priority,
-        estimated_hours=estimated_hours,
+        estimated_hours=metadata["estimated_hours"],
         cover_url=metadata["cover_url"],
-        genre=metadata["genre"],
-        session_length=session_length,
+        genre=metadata["tags"],
+        session_length=metadata["session_length"],
     )
     db.add(new_game)
     db.commit()
@@ -232,30 +289,21 @@ def delete_game(game_id: int):
 
 
 @app.patch("/games/{game_id}")
-def patch_game(
-    game_id: int,
-    title: str = None,
-    status: str = None,
-    priority: int = None,
-    estimated_hours: int = None,
-    session_length: str = None,
-):
+def patch_game(game_id: int, title: str = None, status: str = None, priority: int = None):
     db = SessionLocal()
     game = get_game_or_404(db, game_id)
     if title is not None:
         game.title = title
-        # title changed -> re-look-up cover + genre so they don't go stale
+        # title changed -> re-derive everything so it doesn't go stale
         metadata = fetch_game_metadata(title)
         game.cover_url = metadata["cover_url"]
-        game.genre = metadata["genre"]
+        game.genre = metadata["tags"]
+        game.session_length = metadata["session_length"]
+        game.estimated_hours = metadata["estimated_hours"]
     if status is not None:
         game.status = status
     if priority is not None:
         game.priority = priority
-    if estimated_hours is not None:
-        game.estimated_hours = estimated_hours
-    if session_length is not None:
-        game.session_length = session_length
 
     db.commit()
     db.refresh(game)
@@ -293,12 +341,12 @@ def get_recommendations(mode: str = "resume"):
 @app.get("/quiz-recommendation")
 def quiz_recommendation(session_length: str = "any", genre: str = "any"):
     """The core of the 'what should I play?' chat flow. Filters the backlog
-    by session length and genre, scores what's left, and returns the single
-    best pick with a natural-language explanation.
+    by commitment size and genre/theme, scores what's left, and returns up
+    to the top 3 matches (not just one) with a natural-language explanation
+    each — so a near-miss doesn't feel like a dead wrong answer.
 
     If nothing matches BOTH filters, we relax them one at a time (genre
-    first, then session length) rather than returning nothing — an
-    imperfect suggestion beats a dead end.
+    first, then session length) rather than returning nothing.
     """
     db = SessionLocal()
     games = db.query(Game).all()
@@ -307,23 +355,25 @@ def quiz_recommendation(session_length: str = "any", genre: str = "any"):
     # Dropped games are never worth suggesting, regardless of filters
     candidates = [g for g in games if g.status != "Dropped"]
 
+    def game_tags(g):
+        if not g.genre:
+            return []
+        return [t.strip() for t in g.genre.split(",")]
+
     def matches_session(g):
         return session_length == "any" or g.session_length == session_length
 
     def matches_genre(g):
-        return genre == "any" or g.genre == genre
+        return genre == "any" or genre in game_tags(g)
 
     relaxed_filters = []
 
-    # Try: both filters applied
     filtered = [g for g in candidates if matches_session(g) and matches_genre(g)]
 
-    # Fallback 1: drop the genre filter, keep session length
     if not filtered and genre != "any":
         relaxed_filters = ["genre"]
         filtered = [g for g in candidates if matches_session(g)]
 
-    # Fallback 2: drop session length too, just use whatever's left
     if not filtered and session_length != "any":
         relaxed_filters = ["session_length"]
         filtered = candidates
@@ -333,13 +383,18 @@ def quiz_recommendation(session_length: str = "any", genre: str = "any"):
 
     scored = [(g, score_quiz(g)) for g in filtered]
     scored.sort(key=lambda pair: pair[1], reverse=True)
-    best_game, _ = scored[0]
+    top_matches = scored[:3]
 
     return {
         "found": True,
-        "title": best_game.title,
-        "status": best_game.status,
-        "genre": best_game.genre,
-        "cover_url": best_game.cover_url,
-        "reason": get_quiz_reason(best_game, session_length, genre, relaxed_filters),
+        "results": [
+            {
+                "title": g.title,
+                "status": g.status,
+                "genre": g.genre,
+                "cover_url": g.cover_url,
+                "reason": get_quiz_reason(g, session_length, genre, relaxed_filters),
+            }
+            for g, _ in top_matches
+        ],
     }
